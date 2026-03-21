@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "deal-agent-app",
+    "slug": "deal-agent-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "supabaseUrl": "https://tjaycrpartdsiewnfnlm.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqYXljcnBhcnRkc2lld25mbmxtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3OTUyOTQsImV4cCI6MjA4OTM3MTI5NH0.29ByPNk5lU8jffHSvHsDqvr5I5Fv63C9UiGj22iBcJM"
+    }
+  }
+}
