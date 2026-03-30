@@ -1,32 +1,46 @@
 {
   "expo": {
-    "name": "deal-agent-app",
-    "slug": "deal-agent-app",
-    "version": "1.0.0",
+    "name": "Deal",
+    "slug": "deal-liberia-agent",
+    "version": "1.1.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/adaptive-icon.png",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "ios": {
-      "supportsTablet": true
+      "backgroundColor": "#0A0F0D"
     },
     "android": {
+      "package": "com.deal.liberia",
+      "versionCode": 2,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0F0D"
       },
-      "predictiveBackGestureEnabled": false
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.VIBRATE"
+      ]
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#D4472D"
+        }
+      ]
+    ],
     "extra": {
+      "eas": {
+        "projectId": "0c5ea1b6-d54e-4390-ba18-1a3c16841ff4"
+      },
       "supabaseUrl": "https://tjaycrpartdsiewnfnlm.supabase.co",
       "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqYXljcnBhcnRkc2lld25mbmxtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3OTUyOTQsImV4cCI6MjA4OTM3MTI5NH0.29ByPNk5lU8jffHSvHsDqvr5I5Fv63C9UiGj22iBcJM"
     }

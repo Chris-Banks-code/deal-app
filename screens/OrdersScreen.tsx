@@ -9,8 +9,11 @@ import {
     RefreshControl,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { useNetwork } from '../contexts/NetworkContext';
 import { supabase } from '../lib/supabase';
 import { Deal } from '../types/database.types';
+import { getCachedDeals } from '../lib/offlineStorage';
+import NetworkBanner from '../components/NetworkBanner';
 
 interface DealWithClients extends Deal {
     wholesaler?: { company_name: string };
@@ -19,6 +22,7 @@ interface DealWithClients extends Deal {
 
 export default function OrdersScreen({ navigation }: any) {
     const { profile } = useAuth();
+    const { isOnline } = useNetwork();
     const [orders, setOrders] = useState<DealWithClients[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -26,28 +30,39 @@ export default function OrdersScreen({ navigation }: any) {
 
     useEffect(() => {
         loadOrders();
-    }, [filter]);
+    }, [filter, isOnline]);
 
     const loadOrders = async () => {
         try {
-            let query = supabase
-                .from('deals')
-                .select(`
-          *,
-          wholesaler:clients!deals_wholesaler_id_fkey(company_name),
-          retailer:clients!deals_retailer_id_fkey(company_name)
-        `)
-                .eq('agent_id', profile?.id)
-                .order('created_at', { ascending: false });
+            if (isOnline) {
+                let query = supabase
+                    .from('deals')
+                    .select(`
+            *,
+            wholesaler:clients!deals_wholesaler_id_fkey(company_name),
+            retailer:clients!deals_retailer_id_fkey(company_name)
+          `)
+                    .eq('agent_id', profile?.id)
+                    .order('created_at', { ascending: false });
 
-            if (filter !== 'all') {
-                query = query.eq('status', filter);
+                if (filter !== 'all') {
+                    query = query.eq('status', filter);
+                }
+
+                const { data, error } = await query;
+
+                if (error) throw error;
+                setOrders(data || []);
+            } else {
+                const cachedDeals = getCachedDeals();
+
+                let filtered = cachedDeals;
+                if (filter !== 'all') {
+                    filtered = cachedDeals.filter((d: any) => d.status === filter);
+                }
+
+                setOrders(filtered);
             }
-
-            const { data, error } = await query;
-
-            if (error) throw error;
-            setOrders(data || []);
         } catch (error) {
             console.error('Error loading orders:', error);
         } finally {
@@ -127,62 +142,65 @@ export default function OrdersScreen({ navigation }: any) {
     }
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.title}>My Orders</Text>
-            </View>
+        <>
+            <NetworkBanner />
+            <View style={styles.container}>
+                <View style={styles.header}>
+                    <Text style={styles.title}>My Orders</Text>
+                </View>
 
-            <View style={styles.filterContainer}>
-                <TouchableOpacity
-                    style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
-                    onPress={() => setFilter('all')}
-                >
-                    <Text style={[styles.filterText, filter === 'all' && styles.filterTextActive]}>
-                        All ({orders.length})
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.filterButton, filter === 'pending_admin' && styles.filterButtonActive]}
-                    onPress={() => setFilter('pending_admin')}
-                >
-                    <Text style={[styles.filterText, filter === 'pending_admin' && styles.filterTextActive]}>
-                        Pending
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.filterButton, filter === 'confirmed' && styles.filterButtonActive]}
-                    onPress={() => setFilter('confirmed')}
-                >
-                    <Text style={[styles.filterText, filter === 'confirmed' && styles.filterTextActive]}>
-                        Confirmed
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.filterButton, filter === 'delivered' && styles.filterButtonActive]}
-                    onPress={() => setFilter('delivered')}
-                >
-                    <Text style={[styles.filterText, filter === 'delivered' && styles.filterTextActive]}>
-                        Delivered
-                    </Text>
-                </TouchableOpacity>
-            </View>
+                <View style={styles.filterContainer}>
+                    <TouchableOpacity
+                        style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
+                        onPress={() => setFilter('all')}
+                    >
+                        <Text style={[styles.filterText, filter === 'all' && styles.filterTextActive]}>
+                            All ({orders.length})
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.filterButton, filter === 'pending_admin' && styles.filterButtonActive]}
+                        onPress={() => setFilter('pending_admin')}
+                    >
+                        <Text style={[styles.filterText, filter === 'pending_admin' && styles.filterTextActive]}>
+                            Pending
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.filterButton, filter === 'confirmed' && styles.filterButtonActive]}
+                        onPress={() => setFilter('confirmed')}
+                    >
+                        <Text style={[styles.filterText, filter === 'confirmed' && styles.filterTextActive]}>
+                            Confirmed
+                        </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.filterButton, filter === 'delivered' && styles.filterButtonActive]}
+                        onPress={() => setFilter('delivered')}
+                    >
+                        <Text style={[styles.filterText, filter === 'delivered' && styles.filterTextActive]}>
+                            Delivered
+                        </Text>
+                    </TouchableOpacity>
+                </View>
 
-            <FlatList
-                data={orders}
-                renderItem={renderOrder}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.listContainer}
-                refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#D4472D" />
-                }
-                ListEmptyComponent={
-                    <View style={styles.emptyState}>
-                        <Text style={styles.emptyText}>No orders yet</Text>
-                        <Text style={styles.emptySubtext}>Create your first order to get started</Text>
-                    </View>
-                }
-            />
-        </View>
+                <FlatList
+                    data={orders}
+                    renderItem={renderOrder}
+                    keyExtractor={(item) => item.id}
+                    contentContainerStyle={styles.listContainer}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#D4472D" />
+                    }
+                    ListEmptyComponent={
+                        <View style={styles.emptyState}>
+                            <Text style={styles.emptyText}>No orders yet</Text>
+                            <Text style={styles.emptySubtext}>Create your first order to get started</Text>
+                        </View>
+                    }
+                />
+            </View>
+        </>
     );
 }
 

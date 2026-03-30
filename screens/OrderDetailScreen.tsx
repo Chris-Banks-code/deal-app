@@ -4,475 +4,577 @@ import {
     Text,
     StyleSheet,
     ScrollView,
-    TouchableOpacity,
     ActivityIndicator,
-    Alert,
+    TouchableOpacity,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { useNetwork } from '../contexts/NetworkContext';
 import { supabase } from '../lib/supabase';
+import { Deal } from '../types/database.types';
+import NetworkBanner from '../components/NetworkBanner';
+import Colors from '../constants/Colors';
+import { Ionicons } from '@expo/vector-icons';
 
-interface OrderDetail {
+interface OrderItem {
     id: string;
-    deal_number: string;
     product_name: string;
-    quantity: string;
+    quantity: number;
     unit_price: number;
-    deal_value: number;
+    subtotal: number;
     commission_amount: number;
-    agent_commission: number;
-    delivery_address: string | null;
-    delivery_date: string | null;
-    status: string;
-    agent_notes: string | null;
-    admin_notes: string | null;
-    created_at: string;
-    delivered_at: string | null;
-    wholesaler: { company_name: string; contact_person: string; phone: string };
-    retailer: { company_name: string; contact_person: string; phone: string };
+    commission_rate: number;
+    wholesaler_name: string;
 }
 
 export default function OrderDetailScreen({ route, navigation }: any) {
-    const { orderId } = route.params;
+    const { dealId } = route.params || {};
     const { profile } = useAuth();
-    const [order, setOrder] = useState<OrderDetail | null>(null);
+    const { isOnline } = useNetwork();
+    const [deal, setDeal] = useState<Deal | null>(null);
+    const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
     const [loading, setLoading] = useState(true);
-    const [updating, setUpdating] = useState(false);
 
     useEffect(() => {
-        loadOrderDetail();
-    }, []);
+        if (dealId) {
+            loadOrderDetails();
+        } else {
+            console.error('No dealId provided to OrderDetailScreen');
+            setLoading(false);
+        }
+    }, [dealId, isOnline]);
 
-    const loadOrderDetail = async () => {
+    const loadOrderDetails = async () => {
         try {
-            const { data, error } = await supabase
+            if (!dealId) {
+                console.error('No dealId provided');
+                setLoading(false);
+                return;
+            }
+
+            if (!isOnline) {
+                setLoading(false);
+                return;
+            }
+
+            const { data: dealData, error: dealError } = await supabase
                 .from('deals')
-                .select(`
-          *,
-          wholesaler:clients!deals_wholesaler_id_fkey(company_name, contact_person, phone),
-          retailer:clients!deals_retailer_id_fkey(company_name, contact_person, phone)
-        `)
-                .eq('id', orderId)
+                .select('*')
+                .eq('id', dealId)
                 .single();
 
-            if (error) throw error;
-            setOrder(data);
+            if (dealError) {
+                console.error('Error loading order details:', dealError);
+                throw dealError;
+            }
+
+            setDeal(dealData);
+
+            // Load order items if multi-product
+            if (dealData?.has_multiple_products) {
+                const { data: itemsData, error: itemsError } = await supabase
+                    .from('order_items')
+                    .select('*')
+                    .eq('deal_id', dealId);
+
+                if (itemsError) {
+                    console.error('Error loading order items:', itemsError);
+                } else {
+                    setOrderItems(itemsData || []);
+                }
+            }
         } catch (error) {
-            console.error('Error loading order:', error);
-            Alert.alert('Error', 'Failed to load order details');
+            console.error('Error loading order details:', error);
         } finally {
             setLoading(false);
         }
     };
 
-    const handleMarkAsDelivered = async () => {
-        Alert.alert(
-            'Mark as Delivered',
-            'Are you sure the delivery is complete?',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                    text: 'Yes, Delivered',
-                    onPress: async () => {
-                        setUpdating(true);
-                        try {
-                            const { error } = await supabase
-                                .from('deals')
-                                .update({
-                                    status: 'delivered',
-                                    delivered_at: new Date().toISOString(),
-                                })
-                                .eq('id', orderId);
-
-                            if (error) throw error;
-
-                            Alert.alert('Success', 'Order marked as delivered!');
-                            loadOrderDetail();
-                        } catch (error: any) {
-                            Alert.alert('Error', error.message || 'Failed to update order');
-                        } finally {
-                            setUpdating(false);
-                        }
-                    },
-                },
-            ]
-        );
-    };
-
     const getStatusColor = (status: string) => {
         switch (status) {
-            case 'confirmed':
-            case 'delivered':
             case 'completed':
-                return '#2D7A4D';
+                return Colors.success;
             case 'pending_admin':
-            case 'pending_wholesaler':
-                return '#F4A542';
+                return Colors.warning;
             case 'rejected':
-                return '#D4472D';
+                return Colors.error;
             default:
-                return '#6B7280';
+                return Colors.textSecondary;
         }
     };
 
-    const formatStatus = (status: string) => {
-        return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const getStatusBgColor = (status: string) => {
+        switch (status) {
+            case 'completed':
+                return Colors.successBg;
+            case 'pending_admin':
+                return Colors.warningBg;
+            case 'rejected':
+                return Colors.errorBg;
+            default:
+                return Colors.surfaceVariant;
+        }
     };
 
-    const formatDate = (dateString: string | null) => {
-        if (!dateString) return 'Not set';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+    const getStatusLabel = (status: string) => {
+        switch (status) {
+            case 'pending_admin':
+                return 'Pending Admin Approval';
+            case 'completed':
+                return 'Completed';
+            case 'rejected':
+                return 'Rejected';
+            default:
+                return status;
+        }
     };
 
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#D4472D" />
+                <ActivityIndicator size="large" color={Colors.primary} />
             </View>
         );
     }
 
-    if (!order) {
+    if (!deal) {
         return (
-            <View style={styles.loadingContainer}>
+            <View style={styles.errorContainer}>
+                <Ionicons name="alert-circle-outline" size={64} color={Colors.error} />
                 <Text style={styles.errorText}>Order not found</Text>
+                <TouchableOpacity
+                    style={styles.backButton}
+                    onPress={() => navigation.goBack()}
+                >
+                    <Text style={styles.backButtonText}>Go Back</Text>
+                </TouchableOpacity>
             </View>
         );
     }
-
-    const canMarkAsDelivered = order.status === 'confirmed';
 
     return (
-        <ScrollView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                    <Text style={styles.backButtonText}>← Back</Text>
-                </TouchableOpacity>
-                <Text style={styles.orderNumber}>{order.deal_number}</Text>
-                <View style={[
-                    styles.statusBadge,
-                    { backgroundColor: getStatusColor(order.status) + '30' }
-                ]}>
-                    <Text style={[styles.statusText, { color: getStatusColor(order.status) }]}>
-                        {formatStatus(order.status)}
+        <>
+            <NetworkBanner />
+            <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+                {/* Header */}
+                <View style={styles.header}>
+                    <TouchableOpacity
+                        style={styles.backIcon}
+                        onPress={() => navigation.goBack()}
+                    >
+                        <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Order Details</Text>
+                    <View style={{ width: 24 }} />
+                </View>
+
+                {/* Order ID and Status */}
+                <View style={styles.topCard}>
+                    <View style={styles.orderIdRow}>
+                        <Text style={styles.orderIdLabel}>Order ID</Text>
+                        <Text style={styles.orderIdValue}>{deal.deal_number}</Text>
+                    </View>
+                    <View
+                        style={[
+                            styles.statusBadgeLarge,
+                            { backgroundColor: getStatusBgColor(deal.status) },
+                        ]}
+                    >
+                        <Ionicons
+                            name={
+                                deal.status === 'completed'
+                                    ? 'checkmark-circle'
+                                    : deal.status === 'rejected'
+                                        ? 'close-circle'
+                                        : 'time'
+                            }
+                            size={20}
+                            color={getStatusColor(deal.status)}
+                        />
+                        <Text style={[styles.statusTextLarge, { color: getStatusColor(deal.status) }]}>
+                            {getStatusLabel(deal.status)}
+                        </Text>
+                    </View>
+                </View>
+
+                {/* Client Information */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Client Information</Text>
+                    <View style={styles.card}>
+                        <View style={styles.infoRow}>
+                            <Ionicons name="business" size={20} color={Colors.primary} />
+                            <View style={styles.infoContent}>
+                                <Text style={styles.infoLabel}>Retailer</Text>
+                                <Text style={styles.infoValue}>{deal.retailer_name || 'N/A'}</Text>
+                            </View>
+                        </View>
+
+                        {deal.wholesaler_name && (
+                            <View style={[styles.infoRow, styles.infoRowBorder]}>
+                                <Ionicons name="cube" size={20} color={Colors.primary} />
+                                <View style={styles.infoContent}>
+                                    <Text style={styles.infoLabel}>Wholesaler</Text>
+                                    <Text style={styles.infoValue}>{deal.wholesaler_name}</Text>
+                                </View>
+                            </View>
+                        )}
+                    </View>
+                </View>
+
+                {/* Products */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>
+                        {deal.has_multiple_products ? 'Products' : 'Product Details'}
                     </Text>
-                </View>
-            </View>
-
-            <View style={styles.content}>
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Product Details</Text>
                     <View style={styles.card}>
-                        <Text style={styles.productName}>{order.product_name}</Text>
-                        <View style={styles.row}>
-                            <Text style={styles.label}>Quantity:</Text>
-                            <Text style={styles.value}>{order.quantity}</Text>
-                        </View>
-                        <View style={styles.row}>
-                            <Text style={styles.label}>Unit Price:</Text>
-                            <Text style={styles.value}>${parseFloat(order.unit_price.toString()).toFixed(2)}</Text>
-                        </View>
-                        <View style={styles.separator} />
-                        <View style={styles.row}>
-                            <Text style={styles.labelBold}>Deal Value:</Text>
-                            <Text style={styles.valueBold}>${parseFloat(order.deal_value.toString()).toFixed(2)}</Text>
-                        </View>
+                        {deal.has_multiple_products && orderItems.length > 0 ? (
+                            orderItems.map((item, index) => (
+                                <View
+                                    key={item.id}
+                                    style={[
+                                        styles.productItem,
+                                        index > 0 && styles.productItemBorder,
+                                    ]}
+                                >
+                                    <View style={styles.productHeader}>
+                                        <Text style={styles.productName}>{item.product_name}</Text>
+                                        <Text style={styles.productSupplier}>
+                                            {item.wholesaler_name}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.productDetails}>
+                                        <View style={styles.productDetailRow}>
+                                            <Text style={styles.productDetailLabel}>Quantity:</Text>
+                                            <Text style={styles.productDetailValue}>
+                                                {item.quantity}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.productDetailRow}>
+                                            <Text style={styles.productDetailLabel}>Unit Price:</Text>
+                                            <Text style={styles.productDetailValue}>
+                                                ${item.unit_price.toFixed(2)}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.productDetailRow}>
+                                            <Text style={styles.productDetailLabel}>Subtotal:</Text>
+                                            <Text style={styles.productDetailValue}>
+                                                ${item.subtotal.toFixed(2)}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.productDetailRow}>
+                                            <Text style={styles.productDetailLabel}>
+                                                Commission ({item.commission_rate}%):
+                                            </Text>
+                                            <Text style={[styles.productDetailValue, styles.commissionText]}>
+                                                ${item.commission_amount.toFixed(2)}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            ))
+                        ) : (
+                            <View style={styles.productItem}>
+                                <Text style={styles.productName}>{deal.product_name || 'N/A'}</Text>
+                                <View style={styles.productDetails}>
+                                    {deal.quantity && (
+                                        <View style={styles.productDetailRow}>
+                                            <Text style={styles.productDetailLabel}>Quantity:</Text>
+                                            <Text style={styles.productDetailValue}>{deal.quantity}</Text>
+                                        </View>
+                                    )}
+                                    {deal.unit_price && (
+                                        <View style={styles.productDetailRow}>
+                                            <Text style={styles.productDetailLabel}>Unit Price:</Text>
+                                            <Text style={styles.productDetailValue}>
+                                                ${parseFloat(deal.unit_price.toString()).toFixed(2)}
+                                            </Text>
+                                        </View>
+                                    )}
+                                </View>
+                            </View>
+                        )}
                     </View>
                 </View>
 
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Commission</Text>
-                    <View style={styles.card}>
-                        <View style={styles.row}>
-                            <Text style={styles.label}>Total Commission (10%):</Text>
-                            <Text style={styles.value}>${parseFloat(order.commission_amount.toString()).toFixed(2)}</Text>
-                        </View>
-                        <View style={styles.separator} />
-                        <View style={styles.row}>
-                            <Text style={styles.labelHighlight}>Your Share (70%):</Text>
-                            <Text style={styles.valueHighlight}>${parseFloat(order.agent_commission.toString()).toFixed(2)}</Text>
-                        </View>
-                    </View>
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Wholesaler</Text>
-                    <View style={styles.card}>
-                        <Text style={styles.companyName}>{order.wholesaler.company_name}</Text>
-                        <Text style={styles.contactText}>{order.wholesaler.contact_person}</Text>
-                        <Text style={styles.phoneText}>{order.wholesaler.phone}</Text>
-                    </View>
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Retailer</Text>
-                    <View style={styles.card}>
-                        <Text style={styles.companyName}>{order.retailer.company_name}</Text>
-                        <Text style={styles.contactText}>{order.retailer.contact_person}</Text>
-                        <Text style={styles.phoneText}>{order.retailer.phone}</Text>
-                    </View>
-                </View>
-
+                {/* Delivery Information */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Delivery Information</Text>
                     <View style={styles.card}>
-                        <View style={styles.row}>
-                            <Text style={styles.label}>Address:</Text>
-                            <Text style={styles.value}>{order.delivery_address || 'Not specified'}</Text>
+                        <View style={styles.infoRow}>
+                            <Ionicons name="location" size={20} color={Colors.primary} />
+                            <View style={styles.infoContent}>
+                                <Text style={styles.infoLabel}>Delivery Address</Text>
+                                <Text style={styles.infoValue}>{deal.delivery_address || 'N/A'}</Text>
+                            </View>
                         </View>
-                        <View style={styles.row}>
-                            <Text style={styles.label}>Expected Date:</Text>
-                            <Text style={styles.value}>{formatDate(order.delivery_date)}</Text>
-                        </View>
-                        {order.delivered_at && (
-                            <View style={styles.row}>
-                                <Text style={styles.label}>Delivered:</Text>
-                                <Text style={[styles.value, { color: '#2D7A4D' }]}>{formatDate(order.delivered_at)}</Text>
+
+                        {deal.delivery_date && (
+                            <View style={[styles.infoRow, styles.infoRowBorder]}>
+                                <Ionicons name="calendar" size={20} color={Colors.primary} />
+                                <View style={styles.infoContent}>
+                                    <Text style={styles.infoLabel}>Delivery Date</Text>
+                                    <Text style={styles.infoValue}>
+                                        {new Date(deal.delivery_date).toLocaleDateString()}
+                                    </Text>
+                                </View>
+                            </View>
+                        )}
+
+                        {deal.notes && (
+                            <View style={[styles.infoRow, styles.infoRowBorder]}>
+                                <Ionicons name="document-text" size={20} color={Colors.primary} />
+                                <View style={styles.infoContent}>
+                                    <Text style={styles.infoLabel}>Notes</Text>
+                                    <Text style={styles.infoValue}>{deal.notes}</Text>
+                                </View>
                             </View>
                         )}
                     </View>
                 </View>
 
-                {order.agent_notes && (
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Your Notes</Text>
-                        <View style={styles.card}>
-                            <Text style={styles.notesText}>{order.agent_notes}</Text>
-                        </View>
-                    </View>
-                )}
-
-                {order.admin_notes && (
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Admin Notes</Text>
-                        <View style={styles.card}>
-                            <Text style={styles.notesText}>{order.admin_notes}</Text>
-                        </View>
-                    </View>
-                )}
-
+                {/* Financial Summary */}
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Timeline</Text>
+                    <Text style={styles.sectionTitle}>Financial Summary</Text>
                     <View style={styles.card}>
-                        <View style={styles.timelineItem}>
-                            <View style={styles.timelineDot} />
-                            <View style={styles.timelineContent}>
-                                <Text style={styles.timelineText}>Order Created</Text>
-                                <Text style={styles.timelineDate}>{formatDate(order.created_at)}</Text>
-                            </View>
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Order Value</Text>
+                            <Text style={styles.summaryValue}>
+                                ${parseFloat(deal.deal_value?.toString() || '0').toFixed(2)}
+                            </Text>
                         </View>
-                        {order.status !== 'pending_admin' && (
-                            <View style={styles.timelineItem}>
-                                <View style={styles.timelineDot} />
-                                <View style={styles.timelineContent}>
-                                    <Text style={styles.timelineText}>Admin Approved</Text>
-                                    <Text style={styles.timelineDate}>Status: {formatStatus(order.status)}</Text>
-                                </View>
-                            </View>
-                        )}
-                        {order.delivered_at && (
-                            <View style={styles.timelineItem}>
-                                <View style={[styles.timelineDot, { backgroundColor: '#2D7A4D' }]} />
-                                <View style={styles.timelineContent}>
-                                    <Text style={styles.timelineText}>Delivered</Text>
-                                    <Text style={styles.timelineDate}>{formatDate(order.delivered_at)}</Text>
-                                </View>
+
+                        <View style={styles.summaryDivider} />
+
+                        <View style={styles.summaryRow}>
+                            <Text style={styles.summaryLabel}>Your Commission</Text>
+                            <Text style={[styles.summaryValue, styles.commissionHighlight]}>
+                                ${parseFloat(deal.agent_commission?.toString() || '0').toFixed(2)}
+                            </Text>
+                        </View>
+
+                        {deal.supervisor_commission && (
+                            <View style={styles.summaryRow}>
+                                <Text style={styles.summaryLabel}>Supervisor Override</Text>
+                                <Text style={styles.summaryValue}>
+                                    ${parseFloat(deal.supervisor_commission.toString()).toFixed(2)}
+                                </Text>
                             </View>
                         )}
                     </View>
                 </View>
 
-                {canMarkAsDelivered && (
-                    <TouchableOpacity
-                        style={[styles.deliveredButton, updating && styles.deliveredButtonDisabled]}
-                        onPress={handleMarkAsDelivered}
-                        disabled={updating}
-                    >
-                        {updating ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                        ) : (
-                            <Text style={styles.deliveredButtonText}>✓ Mark as Delivered</Text>
-                        )}
-                    </TouchableOpacity>
-                )}
-            </View>
-        </ScrollView>
+                <View style={{ height: 24 }} />
+            </ScrollView>
+        </>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#0A0F0D',
+        backgroundColor: Colors.background,
     },
     loadingContainer: {
         flex: 1,
-        backgroundColor: '#0A0F0D',
+        backgroundColor: Colors.background,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    errorText: {
-        color: '#D4472D',
-        fontSize: 16,
+    errorContainer: {
+        flex: 1,
+        backgroundColor: Colors.background,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
     },
-    header: {
-        padding: 16,
-        paddingTop: 60,
+    errorText: {
+        fontSize: 18,
+        color: Colors.textPrimary,
+        marginTop: 16,
+        marginBottom: 24,
+        fontWeight: '600',
     },
     backButton: {
-        marginBottom: 16,
+        backgroundColor: Colors.primary,
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 8,
     },
     backButtonText: {
-        color: '#D4472D',
+        color: Colors.textInverse,
         fontSize: 16,
         fontWeight: '600',
     },
-    orderNumber: {
-        fontSize: 28,
+    header: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 20,
+        paddingTop: 60,
+        backgroundColor: Colors.surface,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.border,
+    },
+    backIcon: {
+        width: 40,
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerTitle: {
+        fontSize: 18,
         fontWeight: 'bold',
-        color: '#F8F9FA',
-        marginBottom: 12,
+        color: Colors.textPrimary,
     },
-    statusBadge: {
-        alignSelf: 'flex-start',
+    topCard: {
+        backgroundColor: Colors.surface,
+        margin: 16,
+        padding: 20,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        shadowColor: Colors.shadow,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    orderIdRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    orderIdLabel: {
+        fontSize: 14,
+        color: Colors.textSecondary,
+        fontWeight: '600',
+    },
+    orderIdValue: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: Colors.textPrimary,
+    },
+    statusBadgeLarge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 12,
         paddingHorizontal: 16,
-        paddingVertical: 6,
         borderRadius: 12,
+        gap: 8,
     },
-    statusText: {
+    statusTextLarge: {
         fontSize: 14,
         fontWeight: '600',
     },
-    content: {
-        padding: 16,
-    },
     section: {
-        marginBottom: 24,
+        paddingHorizontal: 16,
+        marginBottom: 16,
     },
     sectionTitle: {
         fontSize: 16,
         fontWeight: 'bold',
-        color: '#A8B5AC',
+        color: Colors.textPrimary,
         marginBottom: 12,
-        textTransform: 'uppercase',
     },
     card: {
-        backgroundColor: '#131A16',
-        borderWidth: 1,
-        borderColor: '#2D3A31',
-        borderRadius: 12,
+        backgroundColor: Colors.surface,
+        borderRadius: 16,
         padding: 16,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        shadowColor: Colors.shadow,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
     },
-    productName: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#F8F9FA',
-        marginBottom: 16,
-    },
-    row: {
+    infoRow: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        paddingVertical: 12,
+    },
+    infoRowBorder: {
+        borderTopWidth: 1,
+        borderTopColor: Colors.border,
+    },
+    infoContent: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    infoLabel: {
+        fontSize: 12,
+        color: Colors.textSecondary,
+        marginBottom: 4,
+        fontWeight: '600',
+    },
+    infoValue: {
+        fontSize: 15,
+        color: Colors.textPrimary,
+    },
+    productItem: {
+        paddingVertical: 12,
+    },
+    productItemBorder: {
+        borderTopWidth: 1,
+        borderTopColor: Colors.border,
+        marginTop: 12,
+    },
+    productHeader: {
         marginBottom: 12,
     },
-    label: {
-        fontSize: 14,
-        color: '#A8B5AC',
-    },
-    value: {
-        fontSize: 14,
-        color: '#F8F9FA',
+    productName: {
+        fontSize: 16,
         fontWeight: '600',
-    },
-    labelBold: {
-        fontSize: 16,
-        color: '#F8F9FA',
-        fontWeight: 'bold',
-    },
-    valueBold: {
-        fontSize: 18,
-        color: '#F8F9FA',
-        fontWeight: 'bold',
-    },
-    labelHighlight: {
-        fontSize: 16,
-        color: '#2D7A4D',
-        fontWeight: 'bold',
-    },
-    valueHighlight: {
-        fontSize: 18,
-        color: '#2D7A4D',
-        fontWeight: 'bold',
-    },
-    separator: {
-        height: 1,
-        backgroundColor: '#2D3A31',
-        marginVertical: 12,
-    },
-    companyName: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#F8F9FA',
-        marginBottom: 8,
-    },
-    contactText: {
-        fontSize: 14,
-        color: '#A8B5AC',
+        color: Colors.textPrimary,
         marginBottom: 4,
     },
-    phoneText: {
-        fontSize: 14,
-        color: '#6B7280',
+    productSupplier: {
+        fontSize: 13,
+        color: Colors.textSecondary,
     },
-    notesText: {
-        fontSize: 14,
-        color: '#F8F9FA',
-        lineHeight: 20,
+    productDetails: {
+        gap: 8,
     },
-    timelineItem: {
+    productDetailRow: {
         flexDirection: 'row',
-        marginBottom: 16,
-    },
-    timelineDot: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        backgroundColor: '#D4472D',
-        marginTop: 4,
-        marginRight: 12,
-    },
-    timelineContent: {
-        flex: 1,
-    },
-    timelineText: {
-        fontSize: 14,
-        color: '#F8F9FA',
-        fontWeight: '600',
-        marginBottom: 4,
-    },
-    timelineDate: {
-        fontSize: 12,
-        color: '#6B7280',
-    },
-    deliveredButton: {
-        backgroundColor: '#2D7A4D',
-        borderRadius: 12,
-        padding: 16,
+        justifyContent: 'space-between',
         alignItems: 'center',
-        marginTop: 8,
-        marginBottom: 40,
     },
-    deliveredButtonDisabled: {
-        opacity: 0.6,
+    productDetailLabel: {
+        fontSize: 13,
+        color: Colors.textSecondary,
     },
-    deliveredButtonText: {
-        color: '#FFFFFF',
-        fontSize: 18,
+    productDetailValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: Colors.textPrimary,
+    },
+    commissionText: {
+        color: Colors.success,
+    },
+    summaryRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 12,
+    },
+    summaryDivider: {
+        height: 1,
+        backgroundColor: Colors.border,
+    },
+    summaryLabel: {
+        fontSize: 14,
+        color: Colors.textSecondary,
+        fontWeight: '600',
+    },
+    summaryValue: {
+        fontSize: 16,
         fontWeight: 'bold',
+        color: Colors.textPrimary,
+    },
+    commissionHighlight: {
+        fontSize: 20,
+        color: Colors.success,
     },
 });

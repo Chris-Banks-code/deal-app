@@ -1,8 +1,10 @@
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { NetworkProvider } from './contexts/NetworkContext';
 import LoginScreen from './screens/LoginScreen';
 import MainNavigator from './navigation/MainNavigator';
+import Colors from './constants/Colors';
 
 function AppContent() {
   const { session, loading } = useAuth();
@@ -10,23 +12,25 @@ function AppContent() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#D4472D" />
+        <ActivityIndicator size="large" color={Colors.primary} />
       </View>
     );
   }
 
-  if (!session) {
-    return <LoginScreen />;
-  }
+  if (!session) return <LoginScreen />;
 
-  return <MainNavigator />;
+  return (
+    <NetworkProvider>
+      <MainNavigator />
+    </NetworkProvider>
+  );
 }
 
 export default function App() {
   return (
     <AuthProvider>
       <AppContent />
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
     </AuthProvider>
   );
 }
@@ -34,7 +38,7 @@ export default function App() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#0A0F0D',
+    backgroundColor: Colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },

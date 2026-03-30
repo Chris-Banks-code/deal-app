@@ -1,30 +1,36 @@
 import React from 'react';
+import { Text } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer } from '@react-navigation/native';
-import { View, Text } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
+
 import DashboardScreen from '../screens/DashboardScreen';
-import ClientsScreen from '../screens/ClientsScreen';
 import CreateOrderScreen from '../screens/CreateOrderScreen';
-import EarningsScreen from '../screens/EarningsScreen';
 import OrdersScreen from '../screens/OrdersScreen';
 import OrderDetailScreen from '../screens/OrderDetailScreen';
+import EarningsScreen from '../screens/EarningsScreen';
+import ClientsScreen from '../screens/ClientsScreen';
+import TeamDashboardScreen from '../screens/TeamDashboardScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
 function TabNavigator() {
+    const { profile } = useAuth();
+    const isSupervisor = profile?.role === 'supervisor';
+
     return (
         <Tab.Navigator
             screenOptions={{
                 headerShown: false,
                 tabBarStyle: {
-                    backgroundColor: '#131A16',
+                    backgroundColor: '#0A0F0D',
                     borderTopColor: '#2D3A31',
                     borderTopWidth: 1,
-                    height: 60,
                     paddingBottom: 8,
                     paddingTop: 8,
+                    height: 60,
                 },
                 tabBarActiveTintColor: '#D4472D',
                 tabBarInactiveTintColor: '#6B7280',
@@ -39,7 +45,7 @@ function TabNavigator() {
                 component={DashboardScreen}
                 options={{
                     tabBarLabel: 'Home',
-                    tabBarIcon: () => <View><Text style={{ fontSize: 20 }}>🏠</Text></View>,
+                    tabBarIcon: () => <Text style={{ fontSize: 20 }}>🏠</Text>,
                 }}
             />
             <Tab.Screen
@@ -47,15 +53,25 @@ function TabNavigator() {
                 component={CreateOrderScreen}
                 options={{
                     tabBarLabel: 'New Order',
-                    tabBarIcon: () => <View><Text style={{ fontSize: 20 }}>➕</Text></View>,
+                    tabBarIcon: () => <Text style={{ fontSize: 20 }}>➕</Text>,
                 }}
             />
+            {isSupervisor && (
+                <Tab.Screen
+                    name="Team"
+                    component={TeamDashboardScreen}
+                    options={{
+                        tabBarLabel: 'Team',
+                        tabBarIcon: () => <Text style={{ fontSize: 20 }}>👥</Text>,
+                    }}
+                />
+            )}
             <Tab.Screen
                 name="Earnings"
                 component={EarningsScreen}
                 options={{
                     tabBarLabel: 'Earnings',
-                    tabBarIcon: () => <View><Text style={{ fontSize: 20 }}>💰</Text></View>,
+                    tabBarIcon: () => <Text style={{ fontSize: 20 }}>💰</Text>,
                 }}
             />
             <Tab.Screen
@@ -63,31 +79,21 @@ function TabNavigator() {
                 component={ClientsScreen}
                 options={{
                     tabBarLabel: 'Clients',
-                    tabBarIcon: () => <View><Text style={{ fontSize: 20 }}>👥</Text></View>,
+                    tabBarIcon: () => <Text style={{ fontSize: 20 }}>👔</Text>,
                 }}
             />
         </Tab.Navigator>
     );
 }
 
-function MainStack() {
-    return (
-        <Stack.Navigator
-            screenOptions={{
-                headerShown: false,
-            }}
-        >
-            <Stack.Screen name="Tabs" component={TabNavigator} />
-            <Stack.Screen name="Orders" component={OrdersScreen} />
-            <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
-        </Stack.Navigator>
-    );
-}
-
 export default function MainNavigator() {
     return (
         <NavigationContainer>
-            <MainStack />
+            <Stack.Navigator screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="Tabs" component={TabNavigator} />
+                <Stack.Screen name="Orders" component={OrdersScreen} />
+                <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
+            </Stack.Navigator>
         </NavigationContainer>
     );
 }
