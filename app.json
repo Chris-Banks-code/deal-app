@@ -3,6 +3,13 @@
     "name": "Deal",
     "slug": "deal-liberia-agent",
     "version": "1.1.0",
+    "updates": {
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/0c5ea1b6-d54e-4390-ba18-1a3c16841ff4"
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "icon": "./assets/adaptive-icon.png",
     "assetBundlePatterns": [
@@ -24,7 +31,11 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.VIBRATE"
+        "android.permission.VIBRATE",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "plugins": [
@@ -34,6 +45,18 @@
         {
           "icon": "./assets/icon.png",
           "color": "#D4472D"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Deal to use your camera to photograph retailer business locations."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Deal to access your photos to attach business images."
         }
       ]
     ],

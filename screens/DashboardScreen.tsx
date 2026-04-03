@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useNetwork } from '../contexts/NetworkContext';
 import { supabase } from '../lib/supabase';
-import { Deal } from '../types/database.types';
+import { Deal, MonthlyTarget } from '../types/database.types';
 import { getCachedDeals } from '../lib/offlineStorage';
 import NetworkBanner from '../components/NetworkBanner';
 import Colors from '../constants/Colors';
@@ -28,7 +28,50 @@ interface Stats {
     completionRate: number;
 }
 
-export default function DashboardScreen({ navigation }: any) {
+const getStatusColor = (status: string) => {
+    switch (status) {
+        case 'completed':
+            return Colors.success;
+        case 'pending_admin':
+            return Colors.warning;
+        case 'rejected':
+            return Colors.error;
+        default:
+            return Colors.textSecondary;
+    }
+};
+
+const getStatusBgColor = (status: string) => {
+    switch (status) {
+        case 'completed':
+            return Colors.successBg;
+        case 'pending_admin':
+            return Colors.warningBg;
+        case 'rejected':
+            return Colors.errorBg;
+        default:
+            return Colors.surfaceVariant;
+    }
+};
+
+const getStatusLabel = (status: string) => {
+    switch (status) {
+        case 'pending_admin':
+            return 'Pending';
+        case 'completed':
+            return 'Completed';
+        case 'rejected':
+            return 'Rejected';
+        default:
+            return status;
+    }
+};
+
+type DashboardNavigation = {
+    navigate: (screen: string, params?: Record<string, unknown>) => void;
+};
+
+export default function DashboardScreen({ navigation }: { navigation: DashboardNavigation }) {
     const { profile, signOut } = useAuth();
     const { isOnline } = useNetwork();
     const [deals, setDeals] = useState<Deal[]>([]);
@@ -42,12 +85,40 @@ export default function DashboardScreen({ navigation }: any) {
     });
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [monthlyTarget, setMonthlyTarget] = useState<MonthlyTarget | null>(null);
+    const [monthlyEarnings, setMonthlyEarnings] = useState(0);
+    const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     useEffect(() => {
         if (profile?.id) {
             loadStats();
+            setupRealtime();
         }
+        return () => {
+            if (realtimeRef.current) {
+                realtimeRef.current.unsubscribe();
+            }
+        };
     }, [isOnline, profile?.id]);
+
+    const setupRealtime = () => {
+        if (!profile?.id) return;
+        if (realtimeRef.current) realtimeRef.current.unsubscribe();
+
+        realtimeRef.current = supabase
+            .channel(`dashboard-${profile.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'deals',
+                    filter: `agent_id=eq.${profile.id}`,
+                },
+                () => { loadStats(); }
+            )
+            .subscribe();
+    };
 
     const loadStats = async () => {
         try {
@@ -59,32 +130,53 @@ export default function DashboardScreen({ navigation }: any) {
             }
 
             if (isOnline) {
-                const { data: dealsData, error: dealsError } = await supabase
-                    .from('deals')
-                    .select('*')
-                    .eq('agent_id', profile.id)
-                    .order('created_at', { ascending: false })
-                    .limit(10);
+                const currentMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
 
-                if (dealsError) {
-                    console.error('Error loading deals:', dealsError);
-                    throw dealsError;
-                }
+                const [
+                    { data: dealsData, error: dealsError },
+                    { data: targetData },
+                    { data: monthDealsData },
+                ] = await Promise.all([
+                    supabase
+                        .from('deals')
+                        .select('*')
+                        .eq('agent_id', profile.id)
+                        .order('created_at', { ascending: false })
+                        .limit(10),
+                    supabase
+                        .from('monthly_targets')
+                        .select('*')
+                        .eq('agent_id', profile.id)
+                        .eq('month', currentMonth)
+                        .single(),
+                    supabase
+                        .from('deals')
+                        .select('agent_commission, created_at')
+                        .eq('agent_id', profile.id)
+                        .eq('status', 'completed')
+                        .gte('created_at', `${currentMonth}-01`),
+                ]);
+
+                if (dealsError) throw dealsError;
 
                 setDeals(dealsData || []);
+                setMonthlyTarget(targetData ?? null);
+
+                const earned = (monthDealsData || []).reduce(
+                    (sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'), 0
+                );
+                setMonthlyEarnings(earned);
 
                 const totalDeals = dealsData?.length || 0;
                 const pendingDeals = dealsData?.filter((d) => d.status === 'pending_admin').length || 0;
                 const completedDeals = dealsData?.filter((d) => d.status === 'completed').length || 0;
-                const totalValue = dealsData?.reduce(
-                    (sum, d) => sum + parseFloat(d.deal_value?.toString() || '0'),
-                    0
-                ) || 0;
-                const totalCommission = dealsData?.reduce(
-                    (sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'),
-                    0
-                ) || 0;
-                const completionRate = totalDeals > 0 ? (completedDeals / totalDeals) * 100 : 0;
+                const totalValue = dealsData
+                    ?.filter((d) => d.status === 'completed')
+                    .reduce((sum, d) => sum + parseFloat(d.deal_value?.toString() || '0'), 0) || 0;
+                const totalCommission = dealsData
+                    ?.filter((d) => d.status === 'completed')
+                    .reduce((sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'), 0) || 0;
+                const completionRate = totalDeals > 0 ? 100 : 0;
 
                 setStats({
                     totalDeals,
@@ -99,17 +191,15 @@ export default function DashboardScreen({ navigation }: any) {
                 setDeals(cachedDeals.slice(0, 10));
 
                 const totalDeals = cachedDeals.length;
-                const pendingDeals = cachedDeals.filter((d) => d.status === 'pending_admin').length;
                 const completedDeals = cachedDeals.filter((d) => d.status === 'completed').length;
-                const totalValue = cachedDeals.reduce(
-                    (sum, d) => sum + parseFloat(d.deal_value?.toString() || '0'),
-                    0
-                );
-                const totalCommission = cachedDeals.reduce(
-                    (sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'),
-                    0
-                );
-                const completionRate = totalDeals > 0 ? (completedDeals / totalDeals) * 100 : 0;
+                const pendingDeals = cachedDeals.filter((d) => d.status === 'pending_admin').length;
+                const totalValue = cachedDeals
+                    .filter((d) => d.status === 'completed')
+                    .reduce((sum, d) => sum + parseFloat(d.deal_value?.toString() || '0'), 0);
+                const totalCommission = cachedDeals
+                    .filter((d) => d.status === 'completed')
+                    .reduce((sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'), 0);
+                const completionRate = totalDeals > 0 ? 100 : 0;
 
                 setStats({
                     totalDeals,
@@ -135,45 +225,6 @@ export default function DashboardScreen({ navigation }: any) {
 
     const handleLogout = async () => {
         await signOut();
-    };
-
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'completed':
-                return Colors.success;
-            case 'pending_admin':
-                return Colors.warning;
-            case 'rejected':
-                return Colors.error;
-            default:
-                return Colors.textSecondary;
-        }
-    };
-
-    const getStatusBgColor = (status: string) => {
-        switch (status) {
-            case 'completed':
-                return Colors.successBg;
-            case 'pending_admin':
-                return Colors.warningBg;
-            case 'rejected':
-                return Colors.errorBg;
-            default:
-                return Colors.surfaceVariant;
-        }
-    };
-
-    const getStatusLabel = (status: string) => {
-        switch (status) {
-            case 'pending_admin':
-                return 'Pending';
-            case 'completed':
-                return 'Completed';
-            case 'rejected':
-                return 'Rejected';
-            default:
-                return status;
-        }
     };
 
     const getGreeting = () => {
@@ -321,6 +372,92 @@ export default function DashboardScreen({ navigation }: any) {
                                 {stats.completionRate.toFixed(0)}% completion rate
                             </Text>
                         </View>
+
+                        {/* Monthly Target Card */}
+                        {(() => {
+                            const monthName = new Date().toLocaleString('default', { month: 'long' });
+                            if (!monthlyTarget) {
+                                return (
+                                    <View style={styles.targetCard}>
+                                        <View style={styles.targetHeader}>
+                                            <Ionicons name="flag-outline" size={20} color="#C6A561" />
+                                            <Text style={styles.targetTitle}>{monthName} Target</Text>
+                                        </View>
+                                        <Text style={styles.targetNoData}>No target set for this month</Text>
+                                    </View>
+                                );
+                            }
+
+                            const target = parseFloat(monthlyTarget.target_amount.toString());
+                            const progress = target > 0 ? Math.min(monthlyEarnings / target, 1) : 0;
+                            const percentage = (progress * 100).toFixed(0);
+                            const remaining = target - monthlyEarnings;
+
+                            let statusIcon: string;
+                            let statusText: string;
+                            let statusColor: string;
+                            let barColor: string;
+
+                            if (monthlyEarnings >= target * 1.0 && monthlyEarnings > target) {
+                                statusIcon = '🏆';
+                                statusText = 'Target Surpassed!';
+                                statusColor = '#C6A561';
+                                barColor = '#C6A561';
+                            } else if (monthlyEarnings >= target) {
+                                statusIcon = '✅';
+                                statusText = 'Target Reached!';
+                                statusColor = '#10B981';
+                                barColor = '#10B981';
+                            } else {
+                                statusIcon = '🎯';
+                                statusText = `$${remaining.toFixed(2)} to go`;
+                                statusColor = '#F59E0B';
+                                barColor = '#F59E0B';
+                            }
+
+                            return (
+                                <View style={styles.targetCard}>
+                                    <View style={styles.targetHeader}>
+                                        <Ionicons name="flag" size={20} color="#C6A561" />
+                                        <Text style={styles.targetTitle}>{monthName} Target</Text>
+                                        <View style={[styles.targetBadge, { backgroundColor: statusColor + '22' }]}>
+                                            <Text style={[styles.targetBadgeText, { color: statusColor }]}>
+                                                {statusIcon} {statusText}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.targetAmounts}>
+                                        <View>
+                                            <Text style={styles.targetAmountLabel}>Earned</Text>
+                                            <Text style={[styles.targetAmountValue, { color: statusColor }]}>
+                                                ${monthlyEarnings.toFixed(2)}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.targetDivider} />
+                                        <View style={{ alignItems: 'flex-end' }}>
+                                            <Text style={styles.targetAmountLabel}>Target</Text>
+                                            <Text style={styles.targetAmountValue}>
+                                                ${target.toFixed(2)}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    <View style={styles.targetProgressBar}>
+                                        <View style={[styles.targetProgressFill, {
+                                            width: `${Math.min(parseFloat(percentage), 100)}%`,
+                                            backgroundColor: barColor,
+                                        }]} />
+                                    </View>
+                                    <Text style={[styles.targetPercentText, { color: statusColor }]}>
+                                        {percentage}% of target
+                                    </Text>
+                                    {monthlyTarget.notes && (
+                                        <Text style={styles.targetNotes}>Note: {monthlyTarget.notes}</Text>
+                                    )}
+                                </View>
+                            );
+                        })()}
                     </View>
                 </LinearGradient>
 
@@ -718,5 +855,91 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: Colors.textSecondary,
         textAlign: 'center',
+    },
+
+    // Monthly Target
+    targetCard: {
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
+        borderRadius: 20,
+        padding: 20,
+        marginTop: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    targetHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 14,
+        gap: 8,
+        flexWrap: 'wrap',
+    },
+    targetTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1B2838',
+        flex: 1,
+    },
+    targetBadge: {
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 20,
+    },
+    targetBadgeText: {
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    targetAmounts: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    targetAmountLabel: {
+        fontSize: 11,
+        color: '#64748B',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        marginBottom: 2,
+    },
+    targetAmountValue: {
+        fontSize: 22,
+        fontWeight: 'bold',
+        color: '#1B2838',
+    },
+    targetDivider: {
+        width: 1,
+        height: 36,
+        backgroundColor: '#E2E8F0',
+    },
+    targetProgressBar: {
+        height: 10,
+        backgroundColor: '#E2E8F0',
+        borderRadius: 5,
+        overflow: 'hidden',
+        marginBottom: 6,
+    },
+    targetProgressFill: {
+        height: '100%',
+        borderRadius: 5,
+    },
+    targetPercentText: {
+        fontSize: 12,
+        fontWeight: '600',
+        marginBottom: 4,
+    },
+    targetNotes: {
+        fontSize: 11,
+        color: '#94A3B8',
+        fontStyle: 'italic',
+        marginTop: 4,
+    },
+    targetNoData: {
+        fontSize: 13,
+        color: '#94A3B8',
+        textAlign: 'center',
+        paddingVertical: 8,
     },
 });

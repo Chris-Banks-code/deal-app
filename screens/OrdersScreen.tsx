@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -27,10 +27,38 @@ export default function OrdersScreen({ navigation }: any) {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [filter, setFilter] = useState<string>('all');
+    const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     useEffect(() => {
         loadOrders();
-    }, [filter, isOnline]);
+        if (profile?.id && isOnline) {
+            setupRealtime();
+        }
+        return () => {
+            if (realtimeRef.current) {
+                realtimeRef.current.unsubscribe();
+            }
+        };
+    }, [filter, isOnline, profile?.id]);
+
+    const setupRealtime = () => {
+        if (!profile?.id) return;
+        if (realtimeRef.current) realtimeRef.current.unsubscribe();
+
+        realtimeRef.current = supabase
+            .channel(`orders-${profile.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'deals',
+                    filter: `agent_id=eq.${profile.id}`,
+                },
+                () => { loadOrders(); }
+            )
+            .subscribe();
+    };
 
     const loadOrders = async () => {
         try {
@@ -99,7 +127,7 @@ export default function OrdersScreen({ navigation }: any) {
     const renderOrder = ({ item }: { item: DealWithClients }) => (
         <TouchableOpacity
             style={styles.orderCard}
-            onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
+            onPress={() => navigation.navigate('OrderDetail', { dealId: item.id })}
         >
             <View style={styles.orderHeader}>
                 <Text style={styles.orderNumber}>{item.deal_number}</Text>

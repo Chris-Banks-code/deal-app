@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NetworkProvider } from './contexts/NetworkContext';
+import { NotificationsProvider } from './contexts/NotificationsContext';
 import LoginScreen from './screens/LoginScreen';
 import MainNavigator from './navigation/MainNavigator';
 import Colors from './constants/Colors';
@@ -21,7 +22,9 @@ function AppContent() {
 
   return (
     <NetworkProvider>
-      <MainNavigator />
+      <NotificationsProvider>
+        <MainNavigator />
+      </NotificationsProvider>
     </NetworkProvider>
   );
 }

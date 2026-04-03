@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import NetInfo from '@react-native-community/netinfo';
 import { supabase } from '../lib/supabase';
 import {
@@ -31,6 +31,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     const { profile } = useAuth();
     const [isOnline, setIsOnline] = useState(true);
     const [isSyncing, setIsSyncing] = useState(false);
+    const isSyncingRef = useRef(false);
     const [pendingSync, setPendingSync] = useState(0);
 
     useEffect(() => {
@@ -64,8 +65,9 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const syncNow = async () => {
-        if (!isOnline || isSyncing || !profile) return;
+        if (!isOnline || isSyncingRef.current || !profile) return;
 
+        isSyncingRef.current = true;
         setIsSyncing(true);
 
         try {
@@ -135,15 +137,12 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
                 ]);
 
                 if (clientsRes.data) {
-                    console.log('Caching', clientsRes.data.length, 'clients');
                     cacheClients(clientsRes.data);
                 }
                 if (productsRes.data) {
-                    console.log('Caching', productsRes.data.length, 'products');
                     cacheProducts(productsRes.data);
                 }
                 if (dealsRes.data) {
-                    console.log('Caching', dealsRes.data.length, 'deals');
                     cacheDeals(dealsRes.data);
                 }
             } catch (cacheError) {
@@ -154,6 +153,7 @@ export const NetworkProvider = ({ children }: { children: ReactNode }) => {
         } catch (error) {
             console.error('Sync failed:', error);
         } finally {
+            isSyncingRef.current = false;
             setIsSyncing(false);
         }
     };

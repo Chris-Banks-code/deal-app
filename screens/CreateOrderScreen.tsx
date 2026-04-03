@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
     View,
     Text,
@@ -17,6 +17,11 @@ import { Product, Client, CartItem } from '../types/database.types';
 import { addToSyncQueue } from '../lib/offlineStorage';
 import NetworkBanner from '../components/NetworkBanner';
 import Colors from '../constants/Colors';
+
+const AGENT_COMMISSION_SHARE = 0.55;
+const SUPERVISOR_COMMISSION_SHARE = 0.07;
+const MANAGER_COMMISSION_SHARE = 0.04;
+const MAX_COMMISSION_RATE = 100;
 
 export default function CreateOrderScreen({ navigation }: any) {
     const { profile } = useAuth();
@@ -193,9 +198,10 @@ export default function CreateOrderScreen({ navigation }: any) {
         const qty = parseInt(quantity);
         const unitPrice = parseFloat(selectedProduct.unit_price?.toString() || '0');
         const subtotal = qty * unitPrice;
-        const commissionRate = parseFloat(selectedProduct.commission_rate?.toString() || '0');
+        const rawRate = parseFloat(selectedProduct.commission_rate?.toString() || '0');
+        const commissionRate = Math.min(Math.max(rawRate, 0), MAX_COMMISSION_RATE);
         const totalCommission = subtotal * (commissionRate / 100);
-        const agentCommission = totalCommission * 0.55;
+        const agentCommission = totalCommission * AGENT_COMMISSION_SHARE;
 
         const cartItem: CartItem = {
             product: selectedProduct,
@@ -230,31 +236,25 @@ export default function CreateOrderScreen({ navigation }: any) {
         );
     };
 
-    const calculateCartTotals = () => {
+    const totals = useMemo(() => {
         const totalValue = cart.reduce((sum, item) => sum + item.subtotal, 0);
         const totalCommission = cart.reduce((sum, item) => sum + item.commission, 0);
 
-        let supervisorDeduction = 0;
-        let managerDeduction = 0;
-
-        if (profile?.supervisor_id) {
-            supervisorDeduction = totalCommission * 0.07;
-        }
-
-        if (profile?.operation_manager_id) {
-            managerDeduction = totalCommission * 0.04;
-        }
-
-        const finalEarnings = totalCommission - supervisorDeduction - managerDeduction;
+        const supervisorDeduction = profile?.supervisor_id
+            ? totalCommission * SUPERVISOR_COMMISSION_SHARE
+            : 0;
+        const managerDeduction = profile?.operation_manager_id
+            ? totalCommission * MANAGER_COMMISSION_SHARE
+            : 0;
 
         return {
             totalValue,
             totalCommission,
             supervisorDeduction,
             managerDeduction,
-            finalEarnings,
+            finalEarnings: totalCommission - supervisorDeduction - managerDeduction,
         };
-    };
+    }, [cart, profile?.supervisor_id, profile?.operation_manager_id]);
 
     const handleSubmit = async () => {
         if (!selectedRetailer) {
@@ -275,8 +275,6 @@ export default function CreateOrderScreen({ navigation }: any) {
         setSubmitting(true);
 
         try {
-            const totals = calculateCartTotals();
-
             // Use first product for main deal record (legacy compatibility)
             const firstItem = cart[0];
 
@@ -375,8 +373,6 @@ export default function CreateOrderScreen({ navigation }: any) {
             </View>
         );
     }
-
-    const totals = calculateCartTotals();
 
     return (
         <>

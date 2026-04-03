@@ -11,7 +11,9 @@ import {
     ActivityIndicator,
     RefreshControl,
     ScrollView,
+    Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../contexts/AuthContext';
 import { useNetwork } from '../contexts/NetworkContext';
 import { supabase } from '../lib/supabase';
@@ -318,6 +320,7 @@ export default function ClientsScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [photos, setPhotos] = useState<string[]>([]);
 
     const [formData, setFormData] = useState({
         company_name: '',
@@ -386,9 +389,61 @@ export default function ClientsScreen() {
         return { lat: 6.3156, lng: -10.807 };
     };
 
+    const takePhoto = async () => {
+        if (photos.length >= 3) {
+            Alert.alert('Limit Reached', 'You can only add up to 3 photos');
+            return;
+        }
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Camera access is needed to take photos of the business');
+            return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.7,
+        });
+        if (!result.canceled && result.assets[0]) {
+            setPhotos(prev => [...prev, result.assets[0].uri]);
+        }
+    };
+
+    const pickFromGallery = async () => {
+        if (photos.length >= 3) {
+            Alert.alert('Limit Reached', 'You can only add up to 3 photos');
+            return;
+        }
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Photo library access is needed');
+            return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [4, 3],
+            quality: 0.7,
+        });
+        if (!result.canceled && result.assets[0]) {
+            setPhotos(prev => [...prev, result.assets[0].uri]);
+        }
+    };
+
+    const removePhoto = (index: number) => {
+        setPhotos(prev => prev.filter((_, i) => i !== index));
+    };
+
     const handleAddClient = async () => {
         if (!formData.company_name || !formData.contact_person || !formData.phone) {
             Alert.alert('Error', 'Please fill in all required fields');
+            return;
+        }
+
+        const phoneRegex = /^[0-9+\-\s()]{7,15}$/;
+        if (!phoneRegex.test(formData.phone.trim())) {
+            Alert.alert('Error', 'Please enter a valid phone number (7-15 digits)');
             return;
         }
 
@@ -399,6 +454,16 @@ export default function ClientsScreen() {
 
         if (!formData.address) {
             Alert.alert('Error', 'Please enter an address for location matching');
+            return;
+        }
+
+        if (formData.client_type === 'retailer' && photos.length === 0) {
+            Alert.alert('Photos Required', 'Please take at least 1 photo of the retailer\'s business (up to 3)');
+            return;
+        }
+
+        if (formData.client_type === 'retailer' && !isOnline) {
+            Alert.alert('Internet Required', 'An internet connection is needed to save retailer photos. Please connect and try again.');
             return;
         }
 
@@ -416,11 +481,41 @@ export default function ClientsScreen() {
             };
 
             if (isOnline) {
-                const { error } = await supabase.from('clients').insert([clientData]);
+                const { data: insertedClient, error } = await supabase
+                    .from('clients')
+                    .insert([clientData])
+                    .select()
+                    .single();
 
                 if (error) throw error;
 
-                Alert.alert('Success', `Client added successfully!${location ? '\n📍 Location mapped' : ''}`);
+                // Upload photos for retailers
+                if (formData.client_type === 'retailer' && photos.length > 0) {
+                    const photoUrls: string[] = [];
+                    for (let i = 0; i < photos.length; i++) {
+                        const uri = photos[i];
+                        const response = await fetch(uri);
+                        const blob = await response.blob();
+                        const fileName = `${insertedClient.id}/photo-${i + 1}.jpg`;
+                        const { error: uploadError } = await supabase.storage
+                            .from('client-photos')
+                            .upload(fileName, blob, { contentType: 'image/jpeg', upsert: true });
+                        if (!uploadError) {
+                            const { data: urlData } = supabase.storage
+                                .from('client-photos')
+                                .getPublicUrl(fileName);
+                            photoUrls.push(urlData.publicUrl);
+                        }
+                    }
+                    if (photoUrls.length > 0) {
+                        await supabase
+                            .from('clients')
+                            .update({ photo_urls: photoUrls })
+                            .eq('id', insertedClient.id);
+                    }
+                }
+
+                Alert.alert('Success', `Client added successfully!${location ? '\n📍 Location mapped' : ''}${photos.length > 0 ? `\n📷 ${photos.length} photo${photos.length > 1 ? 's' : ''} saved` : ''}`);
             } else {
                 addToSyncQueue('clients', 'insert', clientData);
                 Alert.alert('Saved Offline', 'Client saved locally and will sync when online');
@@ -434,6 +529,7 @@ export default function ClientsScreen() {
                 address: '',
                 notes: '',
             });
+            setPhotos([]);
             setModalVisible(false);
             loadClients();
         } catch (error: any) {
@@ -644,6 +740,56 @@ export default function ClientsScreen() {
                                     multiline
                                     numberOfLines={3}
                                 />
+
+                                {formData.client_type === 'retailer' && (
+                                    <>
+                                        <Text style={styles.label}>
+                                            Business Photos * ({photos.length}/3)
+                                        </Text>
+                                        <Text style={styles.helperText}>
+                                            Required: Take up to 3 photos of the retailer's business premises
+                                        </Text>
+
+                                        {photos.length > 0 && (
+                                            <View style={styles.photoGrid}>
+                                                {photos.map((uri, index) => (
+                                                    <View key={index} style={styles.photoWrapper}>
+                                                        <Image
+                                                            source={{ uri }}
+                                                            style={styles.photoThumbnail}
+                                                            resizeMode="cover"
+                                                        />
+                                                        <TouchableOpacity
+                                                            style={styles.removePhotoButton}
+                                                            onPress={() => removePhoto(index)}
+                                                        >
+                                                            <Text style={styles.removePhotoText}>✕</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                ))}
+                                            </View>
+                                        )}
+
+                                        {photos.length < 3 && (
+                                            <View style={styles.photoActions}>
+                                                <TouchableOpacity
+                                                    style={styles.photoButton}
+                                                    onPress={takePhoto}
+                                                >
+                                                    <Text style={styles.photoButtonIcon}>📷</Text>
+                                                    <Text style={styles.photoButtonText}>Take Photo</Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    style={styles.photoButton}
+                                                    onPress={pickFromGallery}
+                                                >
+                                                    <Text style={styles.photoButtonIcon}>🖼️</Text>
+                                                    <Text style={styles.photoButtonText}>Gallery</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        )}
+                                    </>
+                                )}
                             </ScrollView>
 
                             <View style={styles.modalButtons}>
@@ -962,5 +1108,64 @@ const styles = StyleSheet.create({
         color: Colors.textInverse,
         fontSize: 16,
         fontWeight: 'bold',
+    },
+    photoGrid: {
+        flexDirection: 'row',
+        gap: 8,
+        marginTop: 8,
+        marginBottom: 8,
+    },
+    photoWrapper: {
+        position: 'relative',
+        width: 90,
+        height: 90,
+        borderRadius: 8,
+        overflow: 'hidden',
+    },
+    photoThumbnail: {
+        width: 90,
+        height: 90,
+        borderRadius: 8,
+    },
+    removePhotoButton: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        borderRadius: 10,
+        width: 20,
+        height: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    removePhotoText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: 'bold',
+    },
+    photoActions: {
+        flexDirection: 'row',
+        gap: 8,
+        marginTop: 8,
+    },
+    photoButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        backgroundColor: Colors.surface,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        borderRadius: 10,
+        paddingVertical: 12,
+    },
+    photoButtonIcon: {
+        fontSize: 18,
+    },
+    photoButtonText: {
+        fontSize: 14,
+        color: Colors.textPrimary,
+        fontWeight: '600',
     },
 });

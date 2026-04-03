@@ -7,6 +7,7 @@ export interface Profile {
     status: 'active' | 'inactive';
     supervisor_id?: string | null;
     operation_manager_id?: string | null;
+    push_token?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -23,6 +24,7 @@ export interface Client {
     status: 'active' | 'inactive';
     latitude?: number | null;
     longitude?: number | null;
+    photo_urls?: string[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -117,6 +119,16 @@ export interface CommissionBreakdown {
     supervisorOverride: number;
     operationManagerOverride: number;
     finalEarnings: number;
+}
+
+export interface MonthlyTarget {
+    id: string;
+    agent_id: string;
+    target_amount: number;
+    month: string; // 'YYYY-MM'
+    set_by: string;
+    notes?: string | null;
+    created_at: string;
 }
 
 export interface CartItem {

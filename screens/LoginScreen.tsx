@@ -43,7 +43,7 @@ export default function LoginScreen() {
 
     return (
         <LinearGradient
-            colors={['#1B2838', '#2C3E50', '#FFFFFF']}
+            colors={['#1B2838', '#2C3E50', '#1B2838']}
             start={{ x: 0, y: 0 }}
             end={{ x: 0, y: 1 }}
             style={styles.gradient}
@@ -57,25 +57,22 @@ export default function LoginScreen() {
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                 >
-                    {/* Hero Section */}
-                    <View style={styles.heroSection}>
-                        <View style={styles.logoWrapper}>
-                            <Image
-                                source={require('../assets/icon.png')}
-                                style={styles.logo}
-                                resizeMode="contain"
-                            />
-                        </View>
-                        <Text style={styles.heroTitle}>Deal Agent</Text>
-                        <View style={styles.divider} />
-                        <Text style={styles.heroSubtitle}>
-                            Empowering B2B Commerce Across Liberia
-                        </Text>
-                    </View>
-
                     {/* Login Card */}
                     <View style={styles.cardContainer}>
                         <View style={styles.card}>
+                            {/* Logo inside card — white bg blends naturally */}
+                            <View style={styles.logoSection}>
+                                <Image
+                                    source={require('../assets/icon.png')}
+                                    style={styles.logo}
+                                    resizeMode="contain"
+                                />
+                                <View style={styles.divider} />
+                                <Text style={styles.heroSubtitle}>
+                                    Empowering B2B Commerce Across Liberia
+                                </Text>
+                            </View>
+
                             <Text style={styles.cardTitle}>Welcome Back</Text>
                             <Text style={styles.cardSubtitle}>
                                 Sign in to access your dashboard
@@ -130,25 +127,6 @@ export default function LoginScreen() {
                                 </TouchableOpacity>
                             </View>
 
-                            {/* Test Credentials */}
-                            <View style={styles.testCredsSection}>
-                                <View style={styles.testCredsHeader}>
-                                    <View style={styles.testCredsDot} />
-                                    <Text style={styles.testCredsTitle}>Development Mode</Text>
-                                </View>
-                                <View style={styles.testCredItem}>
-                                    <Text style={styles.testCredLabel}>Agent:</Text>
-                                    <Text style={styles.testCredValue}>
-                                        agent@test.com / test123456
-                                    </Text>
-                                </View>
-                                <View style={styles.testCredItem}>
-                                    <Text style={styles.testCredLabel}>Supervisor:</Text>
-                                    <Text style={styles.testCredValue}>
-                                        supervisor@test.com / test123456
-                                    </Text>
-                                </View>
-                            </View>
                         </View>
                     </View>
 
@@ -178,27 +156,17 @@ const styles = StyleSheet.create({
     },
 
     // Hero Section
-    heroSection: {
+    logoSection: {
         alignItems: 'center',
-        marginBottom: 40,
-    },
-    logoWrapper: {
-        width: 100,
-        height: 100,
-        borderRadius: 24,
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.15,
-        shadowRadius: 16,
-        elevation: 8,
+        marginBottom: 24,
+        paddingBottom: 24,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F1F5F9',
     },
     logo: {
-        width: 70,
-        height: 70,
+        width: 200,
+        height: 80,
+        marginBottom: 16,
     },
     heroTitle: {
         fontSize: 36,
@@ -208,17 +176,17 @@ const styles = StyleSheet.create({
         marginBottom: 12,
     },
     divider: {
-        width: 60,
+        width: 48,
         height: 3,
         backgroundColor: '#C6A561',
         borderRadius: 2,
         marginBottom: 12,
     },
     heroSubtitle: {
-        fontSize: 14,
-        color: 'rgba(255, 255, 255, 0.85)',
+        fontSize: 13,
+        color: '#94A3B8',
         textAlign: 'center',
-        letterSpacing: 0.5,
+        letterSpacing: 0.3,
     },
 
     // Card
@@ -293,48 +261,6 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '600',
         letterSpacing: 0.5,
-    },
-
-    // Test Credentials
-    testCredsSection: {
-        backgroundColor: '#F8FAFC',
-        borderRadius: 12,
-        padding: 16,
-        borderLeftWidth: 3,
-        borderLeftColor: '#C6A561',
-    },
-    testCredsHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 12,
-    },
-    testCredsDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#C6A561',
-        marginRight: 8,
-    },
-    testCredsTitle: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: '#64748B',
-        textTransform: 'uppercase',
-        letterSpacing: 0.8,
-    },
-    testCredItem: {
-        marginBottom: 6,
-    },
-    testCredLabel: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#475569',
-        marginBottom: 2,
-    },
-    testCredValue: {
-        fontSize: 11,
-        color: '#64748B',
-        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     },
 
     // Footer

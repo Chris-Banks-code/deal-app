@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigationContainer } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
+import { navigationRef } from './navigationRef';
 
 import DashboardScreen from '../screens/DashboardScreen';
 import CreateOrderScreen from '../screens/CreateOrderScreen';
@@ -88,7 +89,7 @@ function TabNavigator() {
 
 export default function MainNavigator() {
     return (
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef}>
             <Stack.Navigator screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="Tabs" component={TabNavigator} />
                 <Stack.Screen name="Orders" component={OrdersScreen} />

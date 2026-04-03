@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -7,11 +7,13 @@ import {
     ActivityIndicator,
     RefreshControl,
     TouchableOpacity,
+    Alert,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useNetwork } from '../contexts/NetworkContext';
 import { supabase } from '../lib/supabase';
 import { getCachedDeals } from '../lib/offlineStorage';
+import { Deal } from '../types/database.types';
 import NetworkBanner from '../components/NetworkBanner';
 import Colors from '../constants/Colors';
 
@@ -44,47 +46,125 @@ export default function EarningsScreen() {
         agentEarnings: 0,
         supervisorOverride: 0,
         pendingCommission: 0,
+        paidOutThisMonth: 0,
     });
 
     const isSupervisor = profile?.role === 'supervisor';
+    const realtimeRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
     useEffect(() => {
-        loadCommissions();
-    }, [filter, isOnline]);
+        if (profile?.id) {
+            loadCommissions();
+            if (isOnline) setupRealtime();
+        }
+        return () => {
+            if (realtimeRef.current) {
+                realtimeRef.current.unsubscribe();
+            }
+        };
+    }, [filter, isOnline, profile?.id]);
+
+    const setupRealtime = () => {
+        if (!profile?.id) return;
+        if (realtimeRef.current) realtimeRef.current.unsubscribe();
+
+        realtimeRef.current = supabase
+            .channel(`earnings-${profile.id}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'deals',
+                    filter: `agent_id=eq.${profile.id}`,
+                },
+                () => { loadCommissions(); }
+            )
+            .subscribe();
+    };
 
     const loadCommissions = async () => {
+        if (!profile?.id) return;
         try {
             if (isOnline) {
-                let query = supabase
-                    .from('commissions')
-                    .select(`
-            *,
-            deal:deals (
-              deal_number,
-              product_name,
-              deal_value,
-              status,
-              has_multiple_products,
-              total_items
-            )
-          `)
+                // Filtered query — drives the displayed list
+                let dealsQuery = supabase
+                    .from('deals')
+                    .select('*')
                     .eq('agent_id', profile?.id)
                     .order('created_at', { ascending: false });
 
-                if (filter !== 'all') {
-                    query = query.eq('status', filter);
+                if (filter === 'pending') {
+                    dealsQuery = dealsQuery.neq('status', 'completed');
+                } else if (filter === 'paid') {
+                    dealsQuery = dealsQuery.eq('status', 'completed');
                 }
 
-                const { data, error } = await query;
+                // Unfiltered query — always all deals, used only for stats
+                const allDealsQuery = supabase
+                    .from('deals')
+                    .select('agent_commission, status, created_at')
+                    .eq('agent_id', profile?.id);
+
+                const [{ data, error }, { data: allDealsData }] = await Promise.all([
+                    dealsQuery,
+                    allDealsQuery,
+                ]);
 
                 if (error) throw error;
+
+                // Compute stats from ALL deals regardless of active filter
+                const allDeals = (allDealsData as Pick<Deal, 'agent_commission' | 'status' | 'created_at'>[]) || [];
+
+                const now = new Date();
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+
+                // Total Earned = all completed deals (all time)
+                const totalEarned = allDeals
+                    .filter(d => d.status === 'completed')
+                    .reduce((sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'), 0);
+
+                // Pending = active deals not yet completed or rejected
+                const pendingCommission = allDeals
+                    .filter(d => d.status !== 'completed' && d.status !== 'rejected')
+                    .reduce((sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'), 0);
+
+                // Paid Out = completed deals this calendar month only
+                const paidOutThisMonth = allDeals
+                    .filter(d => {
+                        if (d.status !== 'completed') return false;
+                        const dealDate = new Date(d.created_at);
+                        return dealDate.getMonth() === currentMonth && dealDate.getFullYear() === currentYear;
+                    })
+                    .reduce((sum, d) => sum + parseFloat(d.agent_commission?.toString() || '0'), 0);
+
+                setStats({
+                    totalEarned,
+                    agentEarnings: totalEarned,
+                    supervisorOverride: 0,
+                    pendingCommission,
+                    paidOutThisMonth,
+                });
 
                 let allCommissions: CommissionWithDeal[] = [];
 
                 if (data) {
-                    allCommissions = data.map(c => ({
-                        ...c,
+                    allCommissions = (data as Deal[]).map(deal => ({
+                        id: deal.id,
+                        amount: parseFloat(deal.agent_commission?.toString() || '0'),
+                        status: deal.status === 'completed' ? 'paid' as const : 'pending' as const,
+                        paid_at: deal.status === 'completed' ? (deal.delivered_at ?? null) : null,
+                        created_at: deal.created_at,
                         commission_type: 'agent' as const,
+                        deal: {
+                            deal_number: deal.deal_number,
+                            product_name: deal.product_name,
+                            deal_value: parseFloat(deal.deal_value?.toString() || '0'),
+                            status: deal.status,
+                            has_multiple_products: deal.has_multiple_products,
+                            total_items: deal.total_items,
+                        },
                     }));
                 }
 
@@ -94,6 +174,10 @@ export default function EarningsScreen() {
                         .select('*')
                         .eq('supervisor_id', profile?.id)
                         .gt('supervisor_commission', 0);
+
+                    if (supervisorError) {
+                        Alert.alert('Notice', 'Could not load supervisor override commissions. Showing agent commissions only.');
+                    }
 
                     if (!supervisorError && supervisorDeals) {
                         const overrideCommissions = supervisorDeals
@@ -126,43 +210,22 @@ export default function EarningsScreen() {
                 allCommissions.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
                 setCommissions(allCommissions);
-
-                const agentEarnings = allCommissions
-                    .filter(c => c.commission_type === 'agent')
-                    .reduce((sum, c) => sum + parseFloat(c.amount.toString()), 0);
-
-                const supervisorOverride = allCommissions
-                    .filter(c => c.commission_type === 'supervisor_override')
-                    .reduce((sum, c) => sum + parseFloat(c.amount.toString()), 0);
-
-                const totalEarned = agentEarnings + supervisorOverride;
-
-                const pendingCommission = allCommissions
-                    .filter(c => c.status === 'pending')
-                    .reduce((sum, c) => sum + parseFloat(c.amount.toString()), 0);
-
-                setStats({
-                    totalEarned,
-                    agentEarnings,
-                    supervisorOverride,
-                    pendingCommission,
-                });
             } else {
                 const cachedDeals = getCachedDeals();
 
-                const offlineCommissions = cachedDeals
-                    .filter((deal: any) => deal.agent_id === profile?.id)
-                    .map((deal: any) => ({
+                const offlineCommissions = (cachedDeals as Deal[])
+                    .filter((deal) => deal.agent_id === profile?.id)
+                    .map((deal) => ({
                         id: `comm_${deal.id}`,
-                        amount: parseFloat(deal.agent_commission || 0),
+                        amount: parseFloat(deal.agent_commission?.toString() || '0'),
                         status: deal.status === 'completed' ? 'paid' : 'pending',
-                        paid_at: deal.status === 'completed' ? deal.delivered_at : null,
+                        paid_at: deal.status === 'completed' ? (deal as unknown as { delivered_at: string | null }).delivered_at : null,
                         created_at: deal.created_at,
                         commission_type: 'agent' as const,
                         deal: {
                             deal_number: deal.deal_number,
                             product_name: deal.product_name,
-                            deal_value: parseFloat(deal.deal_value || 0),
+                            deal_value: parseFloat(deal.deal_value?.toString() || '0'),
                             status: deal.status,
                             has_multiple_products: deal.has_multiple_products,
                             total_items: deal.total_items,
@@ -171,23 +234,37 @@ export default function EarningsScreen() {
 
                 let filtered = offlineCommissions;
                 if (filter === 'pending') {
-                    filtered = offlineCommissions.filter((c: any) => c.status === 'pending');
+                    filtered = offlineCommissions.filter((c) => c.status === 'pending');
                 } else if (filter === 'paid') {
-                    filtered = offlineCommissions.filter((c: any) => c.status === 'paid');
+                    filtered = offlineCommissions.filter((c) => c.status === 'paid');
                 }
 
                 setCommissions(filtered);
 
-                const total = offlineCommissions.reduce((sum: number, c: any) => sum + c.amount, 0);
+                const now = new Date();
+                const currentMonth = now.getMonth();
+                const currentYear = now.getFullYear();
+
+                const total = offlineCommissions
+                    .filter((c) => c.status === 'paid')
+                    .reduce((sum, c) => sum + c.amount, 0);
                 const pending = offlineCommissions
-                    .filter((c: any) => c.status === 'pending')
-                    .reduce((sum: number, c: any) => sum + c.amount, 0);
+                    .filter((c) => c.status === 'pending')
+                    .reduce((sum, c) => sum + c.amount, 0);
+                const paidOutThisMonth = offlineCommissions
+                    .filter((c) => {
+                        if (c.status !== 'paid') return false;
+                        const d = new Date(c.created_at);
+                        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+                    })
+                    .reduce((sum, c) => sum + c.amount, 0);
 
                 setStats({
                     totalEarned: total,
                     agentEarnings: total,
                     supervisorOverride: 0,
                     pendingCommission: pending,
+                    paidOutThisMonth,
                 });
             }
         } catch (error) {
@@ -314,9 +391,11 @@ export default function EarningsScreen() {
                     </View>
 
                     <View style={[styles.statCard, styles.statCardSmall, styles.statCardSuccess]}>
-                        <Text style={styles.statLabel}>Paid Out</Text>
+                        <Text style={styles.statLabel}>
+                            Paid Out ({new Date().toLocaleString('default', { month: 'short' })})
+                        </Text>
                         <Text style={[styles.statValue, styles.statValueSmall, { color: Colors.success }]}>
-                            ${(stats.totalEarned - stats.pendingCommission).toFixed(2)}
+                            ${stats.paidOutThisMonth.toFixed(2)}
                         </Text>
                     </View>
                 </View>

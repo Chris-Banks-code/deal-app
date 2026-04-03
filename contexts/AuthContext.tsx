@@ -8,7 +8,7 @@ interface AuthContextType {
     user: User | null;
     profile: Profile | null;
     loading: boolean;
-    signIn: (email: string, password: string) => Promise<void>;
+    signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
     signOut: () => Promise<void>;
 }
 
@@ -17,7 +17,7 @@ const AuthContext = createContext<AuthContextType>({
     user: null,
     profile: null,
     loading: true,
-    signIn: async () => { },
+    signIn: async () => ({ error: null }),
     signOut: async () => { },
 });
 
@@ -30,7 +30,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabase.auth.getSession().then(({ data: { session }, error }) => {
+            if (error) {
+                // Stale/invalid refresh token — clear it and force re-login
+                supabase.auth.signOut();
+                setLoading(false);
+                return;
+            }
             setSession(session);
             setUser(session?.user ?? null);
             if (session?.user) {
@@ -64,19 +70,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             if (error) throw error;
             setProfile(data);
-        } catch (error) {
-            console.error('Error loading profile:', error);
+        } catch {
+            // Profile load failure is non-fatal; user will see empty state
         } finally {
             setLoading(false);
         }
     };
 
-    const signIn = async (email: string, password: string) => {
+    const signIn = async (email: string, password: string): Promise<{ error: Error | null }> => {
         const { error } = await supabase.auth.signInWithPassword({
             email,
             password,
         });
-        if (error) throw error;
+        return { error };
     };
 
     const signOut = async () => {

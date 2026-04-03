@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 
@@ -35,24 +36,17 @@ export async function registerForPushNotifications(userId: string) {
         }
 
         if (finalStatus !== 'granted') {
-            console.log('Failed to get push token for push notification!');
             return;
         }
 
-        token = (await Notifications.getExpoPushTokenAsync()).data;
-        console.log('Push token:', token);
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+        token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
 
         // Save token to user profile
-        try {
-            await supabase
-                .from('profiles')
-                .update({ push_token: token })
-                .eq('id', userId);
-        } catch (error) {
-            console.error('Error saving push token:', error);
-        }
-    } else {
-        console.log('Must use physical device for Push Notifications');
+        await supabase
+            .from('profiles')
+            .update({ push_token: token })
+            .eq('id', userId);
     }
 
     return token;
@@ -71,7 +65,7 @@ export async function sendLocalNotification(title: string, body: string) {
 }
 
 // Handle notification tap
-export function addNotificationListener(callback: (notification: any) => void) {
+export function addNotificationListener(callback: (notification: Notifications.Notification) => void) {
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
         callback(response.notification);
     });

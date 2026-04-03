@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import { useAuth } from './AuthContext';
 import { supabase } from '../lib/supabase';
 import { registerForPushNotifications, addNotificationListener } from '../lib/notifications';
+import { navigationRef } from '../navigation/navigationRef';
 
 interface NotificationsContextType {
     expoPushToken: string | undefined;
@@ -27,15 +28,30 @@ export const NotificationsProvider = ({ children }: { children: ReactNode }) => 
             // Register for push notifications
             registerForPushNotifications(profile.id).then(token => setExpoPushToken(token));
 
+            // Handle cold-start: app was killed and user tapped a notification
+            Notifications.getLastNotificationResponseAsync().then(response => {
+                if (!response) return;
+                const data = response.notification.request.content.data;
+                if (data?.dealId) {
+                    navigationRef.current?.navigate('OrderDetail', { dealId: data.dealId });
+                } else if (data?.commissionId) {
+                    navigationRef.current?.navigate('Earnings');
+                }
+            });
+
             // Listen for notifications while app is open
             const notificationListener = Notifications.addNotificationReceivedListener(notification => {
                 setNotification(notification);
             });
 
-            // Handle notification tap
+            // Handle notification tap (foreground / background)
             const responseListener = addNotificationListener((notification) => {
-                console.log('Notification tapped:', notification);
-                // You can navigate to specific screens based on notification data here
+                const data = notification.request.content.data;
+                if (data?.dealId) {
+                    navigationRef.current?.navigate('OrderDetail', { dealId: data.dealId });
+                } else if (data?.commissionId) {
+                    navigationRef.current?.navigate('Earnings');
+                }
             });
 
             // Subscribe to realtime changes for this agent's deals
